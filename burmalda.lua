@@ -1,6 +1,6 @@
 -- ================================================
---   🥔 BURMALDA HACK v16.0
---   ESP + HP + Highlight + Tracer + Aimbot + FOV + HUD
+--   🥔 BURMALDA HACK v17.0
+--   ESP + Highlight + Tracer + Aimbot + FOV + Configs + HUD
 --   Toggle Menu: RightShift
 -- ================================================
 
@@ -12,28 +12,34 @@ local LocalPlayer = Players.LocalPlayer
 
 -- ================= CONFIG =================
 local Config = {
-    ESPEnabled=true, ShowBox=true, ShowName=true, ShowHealth=true,
-    ShowDistance=true, ShowTracer=false, ShowHighlight=true, TeamCheck=true, MaxDistance=1500,
+    -- ESP
+    ESPEnabled=true, ShowBox=true, BoxStyle="2D", ShowName=true, ShowHealth=true,
+    ShowDistance=true, ShowTracer=false, ShowHighlight=true, ShowSkeleton=false,
+    ShowTeam=false, TeamCheck=true, MaxDistance=1500,
     ESPColor=Color3.fromRGB(255,60,120), VisibleColor=Color3.fromRGB(0,255,100),
     HiddenColor=Color3.fromRGB(255,50,50), UseWallColors=true,
     NameColor=Color3.fromRGB(255,255,255), DistColor=Color3.fromRGB(220,220,220),
     TracerColor=Color3.fromRGB(255,60,120), TracerOrigin="Bottom",
-    BoxThickness=2, BoxPadding=2,
+    BoxThickness=2, BoxPadding=2, BoxFillTransparency=0.7,
     HealthMode="Both", HealthBarWidth=5, HealthBarSide="Left", ShowHealthText=true,
     HighlightFillColor=Color3.fromRGB(255,60,120), HighlightFillTransparency=0.6,
     HighlightOutlineColor=Color3.fromRGB(255,255,255), HighlightOutlineTransparency=0.3,
+    SkeletonColor=Color3.fromRGB(255,255,255),
 
+    -- AIMBOT
     AimbotEnabled=false, AimKey=Enum.UserInputType.MouseButton2, AimKeyString="MouseButton2",
-    AimPart="Head", FOV=150, SmoothnessX=0.25, SmoothnessY=0.25,
+    AimMode="Camera", AimPart="Head", FOV=150, SmoothnessX=0.25, SmoothnessY=0.25,
     ShowFOV=false, FOVColor=Color3.fromRGB(255,255,255), FOVTransparency=0.8,
     MaxAimDist=600, WallCheck=false, ToggleMode=false,
     Prediction=0, AutoShoot=false, ShowTarget=true, TargetColor=Color3.fromRGB(255,60,120),
-    AimPriority="Distance", EnemyInventoryEnabled=true,
+    AimPriority="Distance", HitChance=100, HitboxExpand=0, StopOnKill=false,
+    EnemyInventoryEnabled=true,
 
-    WatermarkEnabled=true, WatermarkText="🥔 BURMALDA v16.0",
-
+    -- UI
+    WatermarkEnabled=true, WatermarkText="🥔 BURMALDA v17.0",
     OpenBtnPosition=UDim2.new(0,20,0.5,-25),
     AnimationsEnabled=true, Theme="Classic",
+    CurrentConfig="default",
 }
 
 local Themes = {
@@ -45,6 +51,84 @@ local Themes = {
 }
 
 local function T() return Themes[Config.Theme] or Themes.Classic end
+
+-- ================= CONFIG SYSTEM =================
+local ConfigFolder = "BurmaldaConfigs"
+local hasFS = (writefile and readfile and isfolder and makefolder and listfiles)
+
+local function ensureFolder()
+    if not hasFS then return false end
+    if not isfolder(ConfigFolder) then makefolder(ConfigFolder) end
+    return true
+end
+
+local function serializeValue(v)
+    if typeof(v) == "Color3" then
+        return string.format("Color3.fromRGB(%d,%d,%d)", v.R*255, v.G*255, v.B*255)
+    elseif typeof(v) == "UDim2" then
+        return string.format("UDim2.new(%f,%d,%f,%d)", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
+    elseif typeof(v) == "EnumItem" then
+        return string.format("Enum.%s.%s", v.EnumType.Name, v.Name)
+    elseif type(v) == "string" then
+        return string.format("%q", v)
+    elseif type(v) == "boolean" or type(v) == "number" then
+        return tostring(v)
+    end
+    return "nil"
+end
+
+local function saveConfig(name)
+    if not ensureFolder() then
+        return false, "Executor не поддерживает файлы"
+    end
+    local lines = {"return {"}
+    for k, v in pairs(Config) do
+        table.insert(lines, string.format("  [%q] = %s,", k, serializeValue(v)))
+    end
+    table.insert(lines, "}")
+    local ok, err = pcall(function()
+        writefile(ConfigFolder .. "/" .. name .. ".lua", table.concat(lines, "\n"))
+    end)
+    return ok, err
+end
+
+local function loadConfig(name)
+    if not ensureFolder() then return false, "Executor не поддерживает файлы" end
+    if not isfile(ConfigFolder .. "/" .. name .. ".lua") then
+        return false, "Конфиг не найден"
+    end
+    local ok, data = pcall(function() return readfile(ConfigFolder .. "/" .. name .. ".lua") end)
+    if not ok then return false, "Ошибка чтения" end
+    local fn, err = loadstring(data)
+    if not fn then return false, "Ошибка парсинга: " .. tostring(err) end
+    local ok2, tbl = pcall(fn)
+    if not ok2 or type(tbl) ~= "table" then return false, "Конфиг битый" end
+    for k, v in pairs(tbl) do
+        if Config[k] ~= nil then Config[k] = v end
+    end
+    Config.CurrentConfig = name
+    return true
+end
+
+local function deleteConfig(name)
+    if not hasFS then return false end
+    local path = ConfigFolder .. "/" .. name .. ".lua"
+    if isfile(path) then
+        pcall(function() delfile(path) end)
+        return true
+    end
+    return false
+end
+
+local function listConfigs()
+    if not ensureFolder() then return {} end
+    local out = {}
+    for _, f in ipairs(listfiles(ConfigFolder)) do
+        local n = f:match("([^/\\]+)%.lua$")
+        if n then table.insert(out, n) end
+    end
+    return out
+end
 
 -- ================= GUI =================
 local ScreenGui = Instance.new("ScreenGui")
@@ -58,12 +142,13 @@ local ESPGui = Instance.new("ScreenGui")
 ESPGui.Name = "BurmaldaESP"
 ESPGui.ResetOnSpawn = false
 ESPGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ESPGui.IgnoreGuiInset = false  -- ✅ фикс выравнивания
+ESPGui.IgnoreGuiInset = false
 ESPGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ================= ESP FRAMES =================
 local ESPFrames = {}
 local Highlights = {}
+local Skeletons = {}
 
 local function createESPFrames(plr)
     if ESPFrames[plr] then return ESPFrames[plr] end
@@ -78,6 +163,14 @@ local function createESPFrames(plr)
     f.boxStroke = Instance.new("UIStroke", f.box)
     f.boxStroke.Color = Config.ESPColor
     f.boxStroke.Thickness = Config.BoxThickness
+
+    f.boxFill = Instance.new("Frame")
+    f.boxFill.BackgroundColor3 = Config.ESPColor
+    f.boxFill.BackgroundTransparency = Config.BoxFillTransparency
+    f.boxFill.BorderSizePixel = 0
+    f.boxFill.Visible = false
+    f.boxFill.ZIndex = 1
+    f.boxFill.Parent = ESPGui
 
     f.hpBg = Instance.new("Frame")
     f.hpBg.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
@@ -106,6 +199,17 @@ local function createESPFrames(plr)
     f.name.ZIndex = 20
     f.name.Parent = ESPGui
 
+    f.team = Instance.new("TextLabel")
+    f.team.BackgroundTransparency = 1
+    f.team.TextColor3 = Color3.fromRGB(180,180,180)
+    f.team.Font = Enum.Font.Gotham
+    f.team.TextSize = 11
+    f.team.TextStrokeTransparency = 0
+    f.team.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    f.team.Visible = false
+    f.team.ZIndex = 20
+    f.team.Parent = ESPGui
+
     f.dist = Instance.new("TextLabel")
     f.dist.BackgroundTransparency = 1
     f.dist.TextColor3 = Config.DistColor
@@ -128,7 +232,6 @@ local function createESPFrames(plr)
     f.weapon.ZIndex = 20
     f.weapon.Parent = ESPGui
 
-    -- ✅ Tracer
     f.tracer = Instance.new("Frame")
     f.tracer.BackgroundColor3 = Config.TracerColor
     f.tracer.BorderSizePixel = 0
@@ -145,9 +248,11 @@ local function hideESP(plr)
     local f = ESPFrames[plr]
     if not f then return end
     f.box.Visible = false
+    f.boxFill.Visible = false
     f.hpBg.Visible = false
     f.hpFill.Visible = false
     f.name.Visible = false
+    f.team.Visible = false
     f.dist.Visible = false
     f.weapon.Visible = false
     f.tracer.Visible = false
@@ -208,6 +313,74 @@ local function isVisible(targetChar)
     return false
 end
 
+-- Skeleton helper
+local SKELETON_PAIRS = {
+    {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},{"UpperTorso","LeftUpperArm"},
+    {"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+    {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+    {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+    {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+}
+local SKELETON_PAIRS_R6 = {
+    {"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},
+    {"Torso","Left Leg"},{"Torso","Right Leg"},
+}
+
+local function getSkeletonPairs(char)
+    if char:FindFirstChild("UpperTorso") then return SKELETON_PAIRS end
+    return SKELETON_PAIRS_R6
+end
+
+local function drawSkeleton(plr, char, cam, color)
+    if not Config.ShowSkeleton then
+        if Skeletons[plr] then
+            for _, line in ipairs(Skeletons[plr]) do line.Visible = false end
+        end
+        return
+    end
+    if not Skeletons[plr] then
+        Skeletons[plr] = {}
+        for i = 1, 20 do
+            local line = Instance.new("Frame")
+            line.BackgroundColor3 = Config.SkeletonColor
+            line.BorderSizePixel = 0
+            line.AnchorPoint = Vector2.new(0.5,0.5)
+            line.ZIndex = 3
+            line.Visible = false
+            line.Parent = ESPGui
+            Skeletons[plr][i] = line
+        end
+    end
+    local idx = 1
+    local pairs_ = getSkeletonPairs(char)
+    for _, pair in ipairs(pairs_) do
+        local a = char:FindFirstChild(pair[1])
+        local b = char:FindFirstChild(pair[2])
+        if a and b then
+            local sa, oa = cam:WorldToViewportPoint(a.Position)
+            local sb, ob = cam:WorldToViewportPoint(b.Position)
+            if oa and ob and sa.Z > 0 and sb.Z > 0 then
+                local line = Skeletons[plr][idx]
+                if line then
+                    local delta = Vector2.new(sb.X - sa.X, sb.Y - sa.Y)
+                    local len = delta.Magnitude
+                    local mid = Vector2.new((sa.X+sb.X)/2, (sa.Y+sb.Y)/2)
+                    local angle = math.deg(math.atan2(delta.Y, delta.X))
+                    line.Size = UDim2.new(0, len, 0, 1)
+                    line.Position = UDim2.new(0, mid.X, 0, mid.Y)
+                    line.Rotation = angle
+                    line.BackgroundColor3 = color
+                    line.Visible = true
+                    idx = idx + 1
+                end
+            end
+        end
+    end
+    for i = idx, #Skeletons[plr] do
+        Skeletons[plr][i].Visible = false
+    end
+end
+
 -- ================= ESP LOOP =================
 RunService.RenderStepped:Connect(function()
     local cam = workspace.CurrentCamera
@@ -260,14 +433,30 @@ RunService.RenderStepped:Connect(function()
             local boxW = maxX - minX
             local boxH = maxY - minY
 
+            -- BOX / FILL
             if Config.ShowBox then
-                f.box.Size = UDim2.new(0, boxW, 0, boxH)
-                f.box.Position = UDim2.new(0, minX, 0, minY)
-                f.box.Visible = true
-                f.boxStroke.Color = color
+                if Config.BoxStyle == "Filled" then
+                    f.box.Visible = false
+                    f.boxFill.Size = UDim2.new(0, boxW, 0, boxH)
+                    f.boxFill.Position = UDim2.new(0, minX, 0, minY)
+                    f.boxFill.BackgroundColor3 = color
+                    f.boxFill.BackgroundTransparency = Config.BoxFillTransparency
+                    f.boxFill.Visible = true
+                else
+                    f.boxFill.Visible = false
+                    f.box.Size = UDim2.new(0, boxW, 0, boxH)
+                    f.box.Position = UDim2.new(0, minX, 0, minY)
+                    f.box.Visible = true
+                    f.boxStroke.Color = color
+                    f.boxStroke.Thickness = Config.BoxThickness
+                end
             else
                 f.box.Visible = false
+                f.boxFill.Visible = false
             end
+
+            -- SKELETON
+            drawSkeleton(plr, char, cam, visible and Config.SkeletonColor or Config.HiddenColor)
 
             -- HP BAR
             if Config.ShowHealth and (Config.HealthMode == "Bar" or Config.HealthMode == "Both") then
@@ -325,6 +514,21 @@ RunService.RenderStepped:Connect(function()
                 f.name.Visible = false
             end
 
+            -- TEAM
+            if Config.ShowTeam and plr.Team then
+                local sp, on = cam:WorldToViewportPoint(head.Position + Vector3.new(0, 2.3, 0))
+                if on and sp.Z > 0 then
+                    f.team.Text = "[" .. plr.Team.Name .. "]"
+                    f.team.Position = UDim2.new(0, sp.X - 100, 0, sp.Y - 10)
+                    f.team.Size = UDim2.new(0, 200, 0, 16)
+                    f.team.Visible = true
+                else
+                    f.team.Visible = false
+                end
+            else
+                f.team.Visible = false
+            end
+
             -- DIST
             if Config.ShowDistance then
                 local sp, on = cam:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.5, 0))
@@ -361,7 +565,7 @@ RunService.RenderStepped:Connect(function()
                 f.weapon.Visible = false
             end
 
-            -- ✅ TRACER
+            -- TRACER
             if Config.ShowTracer then
                 local origin
                 if Config.TracerOrigin == "Bottom" then
@@ -442,16 +646,17 @@ local function getTarget()
             score = hum.Health
         elseif Config.AimPriority == "Crosshair" then
             score = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+        elseif Config.AimPriority == "FOV" then
+            score = (Vector2.new(sp.X, sp.Y) - center).Magnitude
         end
         if score < bestScore then
             bestScore = score
-            best = {player = plr, part = part, char = char}
+            best = {player = plr, part = part, char = char, hum = hum, screenPos = Vector2.new(sp.X, sp.Y)}
         end
     end
     return best
 end
 
--- ✅ Prediction: угадываем позицию цели по её скорости
 local function predictPosition(part)
     if Config.Prediction <= 0 then return part.Position end
     local velocity = part.AssemblyLinearVelocity
@@ -459,12 +664,12 @@ local function predictPosition(part)
 end
 
 local aimHeld, aimToggled = false, false
+local lastTarget = nil
 
 local function isAimActive()
     if Config.ToggleMode then return aimToggled else return aimHeld end
 end
 
--- ✅ корректная проверка клавиши/мыши
 local function matchesKey(input, key)
     if not key then return false end
     if typeof(key) == "EnumItem" then
@@ -493,17 +698,70 @@ RunService.RenderStepped:Connect(function()
     if Config.AimbotEnabled and isAimActive() then
         local target = getTarget()
         if target and target.part then
+            -- StopOnKill
+            if Config.StopOnKill and lastTarget and lastTarget.hum and lastTarget.hum.Health <= 0 then
+                aimHeld = false
+                aimToggled = false
+                lastTarget = nil
+                return
+            end
+            lastTarget = target
+
+            -- Hit chance
+            if Config.HitChance < 100 then
+                if math.random(1, 100) > Config.HitChance then return end
+            end
+
             local currentCF = cam.CFrame
             local aimPos = predictPosition(target.part)
-            local desiredCF = CFrame.new(currentCF.Position, aimPos)
+            local desiredCF
+            if Config.AimMode == "Mouse" then
+                local sp = cam:WorldToViewportPoint(aimPos)
+                local deltaX = sp.X - cam.ViewportSize.X/2
+                local deltaY = sp.Y - cam.ViewportSize.Y/2
+                local yaw = -deltaX * 0.005
+                local pitch = -deltaY * 0.005
+                desiredCF = currentCF * CFrame.Angles(pitch, yaw, 0)
+            else
+                desiredCF = CFrame.new(currentCF.Position, aimPos)
+            end
             local ax = math.clamp(1 - Config.SmoothnessX, 0.02, 1)
             local ay = math.clamp(1 - Config.SmoothnessY, 0.02, 1)
             cam.CFrame = currentCF:Lerp(desiredCF, (ax + ay) / 2)
+
             if Config.AutoShoot then
                 local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
                 if tool then pcall(function() tool:Activate() end) end
             end
         end
+    else
+        lastTarget = nil
+    end
+end)
+
+-- Target highlight
+RunService.RenderStepped:Connect(function()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    if not (Config.AimbotEnabled and Config.ShowTarget and isAimActive()) then return end
+    local t = getTarget()
+    if not t then return end
+    if not TargetDot then
+        TargetDot = Instance.new("Frame")
+        TargetDot.Size = UDim2.new(0, 8, 0, 8)
+        TargetDot.AnchorPoint = Vector2.new(0.5, 0.5)
+        TargetDot.BackgroundColor3 = Config.TargetColor
+        TargetDot.BorderSizePixel = 0
+        TargetDot.ZIndex = 60
+        TargetDot.Parent = ScreenGui
+        Instance.new("UICorner", TargetDot).CornerRadius = UDim.new(1, 0)
+    end
+    local sp, on = cam:WorldToViewportPoint(t.part.Position)
+    if on and sp.Z > 0 then
+        TargetDot.Position = UDim2.new(0, sp.X, 0, sp.Y)
+        TargetDot.Visible = true
+    else
+        TargetDot.Visible = false
     end
 end)
 
@@ -605,14 +863,13 @@ local HeaderSub = Instance.new("TextLabel")
 HeaderSub.Size = UDim2.new(0, 220, 1, 0)
 HeaderSub.Position = UDim2.new(1, -270, 0, 0)
 HeaderSub.BackgroundTransparency = 1
-HeaderSub.Text = "v16.0"
+HeaderSub.Text = "v17.0"
 HeaderSub.TextColor3 = T().textDim
 HeaderSub.Font = Enum.Font.Gotham
 HeaderSub.TextSize = 12
 HeaderSub.TextXAlignment = Enum.TextXAlignment.Right
 HeaderSub.Parent = Header
 
--- ✅ Minimize button (исправлено)
 local Minimize = Instance.new("TextButton")
 Minimize.Size = UDim2.new(0, 30, 0, 30)
 Minimize.Position = UDim2.new(1, -78, 0, 13)
@@ -879,7 +1136,24 @@ local function createOption(parent, text, callback)
     return btn
 end
 
--- ✅ applyTheme объявлена ДО использования во вкладке Settings
+local function createTextBox(parent, placeholder, default, callback)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, 0, 0, 38)
+    box.BackgroundColor3 = T().content
+    box.Text = default or ""
+    box.PlaceholderText = placeholder
+    box.TextColor3 = Color3.fromRGB(255,255,255)
+    box.PlaceholderColor3 = T().textDim
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 13
+    box.BorderSizePixel = 0
+    box.ClearTextOnFocus = false
+    box.Parent = parent
+    Instance.new("UICorner", box).CornerRadius = UDim.new(1, 0)
+    box.FocusLost:Connect(function() callback(box.Text) end)
+    return box
+end
+
 function applyTheme()
     local t = T()
     Main.BackgroundColor3 = t.bg
@@ -910,11 +1184,13 @@ end
 createTab("ESP", "👁", 1)
 createTab("Aimbot", "🎯", 2)
 createTab("Visuals", "✨", 3)
-createTab("Settings", "⚙", 4)
+createTab("Colors", "🎨", 4)
+createTab("Settings", "⚙", 5)
 
 local espPage = createPage("ESP")
 local aimPage = createPage("Aimbot")
 local visPage = createPage("Visuals")
+local colPage = createPage("Colors")
 local setPage = createPage("Settings")
 
 -- ESP
@@ -923,10 +1199,28 @@ createToggle(espPage, "ESP Включён", Config.ESPEnabled, function(v) Confi
 createToggle(espPage, "Проверка команды", Config.TeamCheck, function(v) Config.TeamCheck = v end)
 createSection(espPage, "Отображение")
 createToggle(espPage, "Боксы", Config.ShowBox, function(v) Config.ShowBox = v end)
+createToggle(espPage, "Скелет", Config.ShowSkeleton, function(v) Config.ShowSkeleton = v end)
 createToggle(espPage, "Имена", Config.ShowName, function(v) Config.ShowName = v end)
+createToggle(espPage, "Команда", Config.ShowTeam, function(v) Config.ShowTeam = v end)
 createToggle(espPage, "HP", Config.ShowHealth, function(v) Config.ShowHealth = v end)
 createToggle(espPage, "Дистанция", Config.ShowDistance, function(v) Config.ShowDistance = v end)
 createToggle(espPage, "Оружие врага", Config.EnemyInventoryEnabled, function(v) Config.EnemyInventoryEnabled = v end)
+createSection(espPage, "Стиль боксов")
+local boxStyles = {{name="2D", value="2D"}, {name="Filled", value="Filled"}}
+local boxBtns = {}
+for _, opt in ipairs(boxStyles) do
+    local b = createOption(espPage, opt.name, function(btn)
+        Config.BoxStyle = opt.value
+        for v, btn2 in pairs(boxBtns) do
+            TweenService:Create(btn2, TweenInfo.new(0.15), {
+                BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
+        end
+    end)
+    if opt.value == Config.BoxStyle then b.BackgroundColor3 = T().accent1 end
+    boxBtns[opt.value] = b
+end
+createSlider(espPage, "Толщина обводки", 1, 5, Config.BoxThickness, function(v) Config.BoxThickness = v end)
+createSlider(espPage, "Прозрачность заливки", 0, 1, Config.BoxFillTransparency, function(v) Config.BoxFillTransparency = v end)
 createSection(espPage, "Wall Sense")
 createToggle(espPage, "Умная подсветка", Config.UseWallColors, function(v) Config.UseWallColors = v end)
 createSection(espPage, "HP-полоска")
@@ -943,19 +1237,36 @@ for _, opt in ipairs(hpModes) do
     if opt.value == Config.HealthMode then b.BackgroundColor3 = T().accent1 end
     hpBtns[opt.value] = b
 end
-createSlider(espPage, "Толщина", 3, 15, Config.HealthBarWidth, function(v) Config.HealthBarWidth = v end)
+createSlider(espPage, "Толщина HP", 3, 15, Config.HealthBarWidth, function(v) Config.HealthBarWidth = v end)
 createSlider(espPage, "Макс. дистанция", 50, 3000, Config.MaxDistance, function(v) Config.MaxDistance = v end)
 
 -- AIMBOT
 createSection(aimPage, "Основное")
 createToggle(aimPage, "Aimbot Включён", Config.AimbotEnabled, function(v) Config.AimbotEnabled = v end)
+createToggle(aimPage, "Показывать цель", Config.ShowTarget, function(v) Config.ShowTarget = v end)
 createSection(aimPage, "Точность")
 createSlider(aimPage, "FOV", 20, 600, Config.FOV, function(v) Config.FOV = v end)
 createSlider(aimPage, "Smoothness X", 0, 0.95, Config.SmoothnessX, function(v) Config.SmoothnessX = v end)
 createSlider(aimPage, "Smoothness Y", 0, 0.95, Config.SmoothnessY, function(v) Config.SmoothnessY = v end)
 createSlider(aimPage, "Prediction", 0, 500, Config.Prediction, function(v) Config.Prediction = v end)
+createSlider(aimPage, "Hit Chance %", 0, 100, Config.HitChance, function(v) Config.HitChance = v end)
+createSlider(aimPage, "Max Aim Dist", 50, 2000, Config.MaxAimDist, function(v) Config.MaxAimDist = v end)
+createSection(aimPage, "Режим")
+local aimModes = {{name="🎥 Camera", value="Camera"}, {name="🖱 Mouse", value="Mouse"}}
+local aimModeBtns = {}
+for _, opt in ipairs(aimModes) do
+    local b = createOption(aimPage, opt.name, function(btn)
+        Config.AimMode = opt.value
+        for v, btn2 in pairs(aimModeBtns) do
+            TweenService:Create(btn2, TweenInfo.new(0.15), {
+                BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
+        end
+    end)
+    if opt.value == Config.AimMode then b.BackgroundColor3 = T().accent1 end
+    aimModeBtns[opt.value] = b
+end
 createSection(aimPage, "Часть тела")
-local aimOpts = {{name="🎯 Head", value="Head"}, {name="🎯 Torso", value="Torso"}, {name="🎯 Nearest", value="Nearest"}}
+local aimOpts = {{name="🎯 Head", value="Head"}, {name="🎯 Torso", value="Torso"}, {name="🎯 Nearest", value="Nearest"}, {name="🎲 Random", value="Random"}}
 local aimBtns = {}
 for _, opt in ipairs(aimOpts) do
     local b = createOption(aimPage, opt.name, function(btn)
@@ -968,10 +1279,25 @@ for _, opt in ipairs(aimOpts) do
     if opt.value == Config.AimPart then b.BackgroundColor3 = T().accent1 end
     aimBtns[opt.value] = b
 end
+createSection(aimPage, "Приоритет")
+local priorities = {{name="📏 Distance", value="Distance"}, {name="❤ Health", value="Health"}, {name="✛ Crosshair", value="Crosshair"}}
+local prioBtns = {}
+for _, opt in ipairs(priorities) do
+    local b = createOption(aimPage, opt.name, function(btn)
+        Config.AimPriority = opt.value
+        for v, btn2 in pairs(prioBtns) do
+            TweenService:Create(btn2, TweenInfo.new(0.15), {
+                BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
+        end
+    end)
+    if opt.value == Config.AimPriority then b.BackgroundColor3 = T().accent1 end
+    prioBtns[opt.value] = b
+end
 createSection(aimPage, "Дополнительно")
 createToggle(aimPage, "Wall Check", Config.WallCheck, function(v) Config.WallCheck = v end)
 createToggle(aimPage, "Toggle режим", Config.ToggleMode, function(v) Config.ToggleMode = v end)
 createToggle(aimPage, "Авто-выстрел", Config.AutoShoot, function(v) Config.AutoShoot = v end)
+createToggle(aimPage, "Стоп после убийства", Config.StopOnKill, function(v) Config.StopOnKill = v end)
 
 -- VISUALS
 createSection(visPage, "Highlight")
@@ -999,7 +1325,61 @@ createSlider(visPage, "FOV Transparency", 0, 1, Config.FOVTransparency, function
 createSection(visPage, "Watermark")
 createToggle(visPage, "Показывать Watermark", Config.WatermarkEnabled, function(v) Config.WatermarkEnabled = v; Watermark.Visible = v end)
 
--- SETTINGS
+-- COLORS
+local function colorRow(parent, label, getter, setter)
+    createSection(parent, label)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, 38)
+    row.BackgroundColor3 = T().content
+    row.BorderSizePixel = 0
+    row.Parent = parent
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 12)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -80, 1, 0)
+    lbl.Position = UDim2.new(0, 16, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "Текущий: RGB"
+    lbl.TextColor3 = T().text
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = row
+    local swatch = Instance.new("Frame")
+    swatch.Size = UDim2.new(0, 60, 0, 22)
+    swatch.Position = UDim2.new(1, -70, 0.5, -11)
+    swatch.BackgroundColor3 = getter()
+    swatch.BorderSizePixel = 0
+    swatch.Parent = row
+    Instance.new("UICorner", swatch).CornerRadius = UDim.new(0, 6)
+
+    local sliders = {}
+    for i, ch in ipairs({"R","G","B"}) do
+        local val = ({getter().R, getter().G, getter().B})[i] * 255
+        createSlider(parent, "  " .. ch, 0, 255, val, function(v)
+            local c = getter()
+            local comps = {c.R*255, c.G*255, c.B*255}
+            comps[i] = v
+            local newC = Color3.fromRGB(comps[1], comps[2], comps[3])
+            setter(newC)
+            swatch.BackgroundColor3 = newC
+            lbl.Text = string.format("RGB(%d,%d,%d)", comps[1], comps[2], comps[3])
+        end)
+    end
+    lbl.Text = string.format("RGB(%d,%d,%d)", getter().R*255, getter().G*255, getter().B*255)
+end
+
+colorRow(colPage, "ESP Color", function() return Config.ESPColor end, function(c) Config.ESPColor = c end)
+colorRow(colPage, "Visible Color", function() return Config.VisibleColor end, function(c) Config.VisibleColor = c end)
+colorRow(colPage, "Hidden Color", function() return Config.HiddenColor end, function(c) Config.HiddenColor = c end)
+colorRow(colPage, "Name Color", function() return Config.NameColor end, function(c) Config.NameColor = c end)
+colorRow(colPage, "Tracer Color", function() return Config.TracerColor end, function(c) Config.TracerColor = c end)
+colorRow(colPage, "Highlight Fill", function() return Config.HighlightFillColor end, function(c) Config.HighlightFillColor = c end)
+colorRow(colPage, "Highlight Outline", function() return Config.HighlightOutlineColor end, function(c) Config.HighlightOutlineColor = c end)
+colorRow(colPage, "Skeleton", function() return Config.SkeletonColor end, function(c) Config.SkeletonColor = c end)
+colorRow(colPage, "FOV Color", function() return Config.FOVColor end, function(c) Config.FOVColor = c end; FOVStroke.Color = c end)
+colorRow(colPage, "Target Color", function() return Config.TargetColor end, function(c) Config.TargetColor = c end)
+
+-- SETTINGS / CONFIGS
 createSection(setPage, "Тема")
 local themeKeys = {}
 for k in pairs(Themes) do table.insert(themeKeys, k) end
@@ -1017,6 +1397,163 @@ for _, k in ipairs(themeKeys) do
     if k == Config.Theme then b.BackgroundColor3 = Themes[k].accent1 end
     themeBtns[k] = b
 end
+
+createSection(setPage, "Конфиги")
+local ConfigStatusLbl = Instance.new("TextLabel")
+ConfigStatusLbl.Size = UDim2.new(1, 0, 0, 24)
+ConfigStatusLbl.BackgroundTransparency = 1
+ConfigStatusLbl.Text = hasFS and ("Папка: " .. ConfigFolder) or "⚠ Executor не поддерживает файлы"
+ConfigStatusLbl.TextColor3 = hasFS and T().textDim or Color3.fromRGB(255,120,120)
+ConfigStatusLbl.Font = Enum.Font.Gotham
+ConfigStatusLbl.TextSize = 11
+ConfigStatusLbl.TextXAlignment = Enum.TextXAlignment.Left
+ConfigStatusLbl.Parent = setPage
+
+local ConfigNameBox = createTextBox(setPage, "Имя конфига", "default", function(v)
+    if v and v ~= "" then Config.CurrentConfig = v end
+end)
+
+local cfgRow = Instance.new("Frame")
+cfgRow.Size = UDim2.new(1, 0, 0, 44)
+cfgRow.BackgroundTransparency = 1
+cfgRow.Parent = setPage
+local cfgLayout = Instance.new("UIListLayout", cfgRow)
+cfgLayout.FillDirection = Enum.FillDirection.Horizontal
+cfgLayout.Padding = UDim.new(0, 6)
+cfgLayout.SortOrder = Enum.SortOrder.LayoutOrder
+cfgLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+
+local function mkBtn(text, color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 140, 0, 38)
+    b.BackgroundColor3 = color or T().content
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(255,255,255)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.BorderSizePixel = 0
+    b.AutoButtonColor = false
+    b.Parent = cfgRow
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 10)
+    return b
+end
+
+local SaveBtn = mkBtn("💾 Сохранить", T().accent1)
+local LoadBtn = mkBtn("📂 Загрузить")
+local DeleteBtn = mkBtn("🗑 Удалить", Color3.fromRGB(180,50,50))
+local RefreshBtn = mkBtn("🔄 Обновить список")
+
+local ConfigList = Instance.new("Frame")
+ConfigList.Size = UDim2.new(1, 0, 0, 160)
+ConfigList.BackgroundColor3 = T().content
+ConfigList.BorderSizePixel = 0
+ConfigList.Parent = setPage
+Instance.new("UICorner", ConfigList).CornerRadius = UDim.new(0, 12)
+local listLayout = Instance.new("UIListLayout", ConfigList)
+listLayout.Padding = UDim.new(0, 4)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local listPad = Instance.new("UIPadding", ConfigList)
+listPad.PaddingTop = UDim.new(0, 8)
+listPad.PaddingBottom = UDim.new(0, 8)
+listPad.PaddingLeft = UDim.new(0, 8)
+listPad.PaddingRight = UDim.new(0, 8)
+local listScroll = Instance.new("ScrollingFrame", ConfigList)
+listScroll.Size = UDim2.new(1, 0, 1, 0)
+listScroll.BackgroundTransparency = 1
+listScroll.BorderSizePixel = 0
+listScroll.ScrollBarThickness = 4
+listScroll.ScrollBarImageColor3 = T().accent1
+listScroll.CanvasSize = UDim2.new(0,0,0,0)
+listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local lsLayout = Instance.new("UIListLayout", listScroll)
+lsLayout.Padding = UDim.new(0, 4)
+lsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function refreshConfigList()
+    for _, c in ipairs(listScroll:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    local list = listConfigs()
+    if #list == 0 then
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1, 0, 0, 30)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = hasFS and "— пусто —" or "— нет доступа к файлам —"
+        lbl.TextColor3 = T().textDim
+        lbl.Font = Enum.Font.Gotham
+        lbl.TextSize = 12
+        lbl.Parent = listScroll
+        return
+    end
+    for _, name in ipairs(list) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, 0, 0, 32)
+        b.BackgroundColor3 = T().contentHover
+        b.Text = (name == Config.CurrentConfig) and ("✅ " .. name) or ("📄 " .. name)
+        b.TextColor3 = Color3.fromRGB(255,255,255)
+        b.Font = Enum.Font.Gotham
+        b.TextSize = 13
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Parent = listScroll
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+        b.MouseButton1Click:Connect(function()
+            Config.CurrentConfig = name
+            ConfigNameBox.Text = name
+            refreshConfigList()
+        end)
+    end
+end
+
+SaveBtn.MouseButton1Click:Connect(function()
+    local name = ConfigNameBox.Text
+    if not name or name == "" then name = "default" end
+    local ok, err = saveConfig(name)
+    if ok then
+        ConfigStatusLbl.Text = "✅ Сохранено: " .. name
+        ConfigStatusLbl.TextColor3 = Color3.fromRGB(100,255,100)
+        Config.CurrentConfig = name
+        refreshConfigList()
+    else
+        ConfigStatusLbl.Text = "❌ " .. tostring(err)
+        ConfigStatusLbl.TextColor3 = Color3.fromRGB(255,100,100)
+    end
+end)
+
+LoadBtn.MouseButton1Click:Connect(function()
+    local name = ConfigNameBox.Text
+    if not name or name == "" then name = "default" end
+    local ok, err = loadConfig(name)
+    if ok then
+        ConfigStatusLbl.Text = "✅ Загружено: " .. name
+        ConfigStatusLbl.TextColor3 = Color3.fromRGB(100,255,100)
+        applyTheme()
+        refreshConfigList()
+    else
+        ConfigStatusLbl.Text = "❌ " .. tostring(err)
+        ConfigStatusLbl.TextColor3 = Color3.fromRGB(255,100,100)
+    end
+end)
+
+DeleteBtn.MouseButton1Click:Connect(function()
+    local name = ConfigNameBox.Text
+    if deleteConfig(name) then
+        ConfigStatusLbl.Text = "🗑 Удалён: " .. name
+        ConfigStatusLbl.TextColor3 = Color3.fromRGB(255,200,100)
+        refreshConfigList()
+    else
+        ConfigStatusLbl.Text = "❌ Не найден: " .. name
+        ConfigStatusLbl.TextColor3 = Color3.fromRGB(255,100,100)
+    end
+end)
+
+RefreshBtn.MouseButton1Click:Connect(function()
+    refreshConfigList()
+    ConfigStatusLbl.Text = "🔄 Обновлено"
+    ConfigStatusLbl.TextColor3 = T().textDim
+end)
+
+refreshConfigList()
 
 -- ================= DRAG =================
 local dragging, dragStart, startPos
@@ -1051,7 +1588,7 @@ local function closeMenu()
     OpenBtn.Visible = true
 end
 CloseBtn.MouseButton1Click:Connect(closeMenu)
-Minimize.MouseButton1Click:Connect(closeMenu)  -- ✅ теперь работает
+Minimize.MouseButton1Click:Connect(closeMenu)
 OpenBtn.MouseButton1Click:Connect(openMenu)
 
 UserInputService.InputBegan:Connect(function(input, gpe)
@@ -1067,6 +1604,7 @@ RunService.RenderStepped:Connect(function()
         local d = Config.FOV * 2
         FOVCircle.Size = UDim2.new(0, d, 0, d)
         FOVCircle.Visible = true
+        FOVStroke.Color = Config.FOVColor
     else
         FOVCircle.Visible = false
     end
@@ -1075,4 +1613,4 @@ end)
 OpenBtn.Visible = false
 switchTab("ESP")
 openMenu()
-print("[BURMALDA v16.0] Loaded! ✅")
+print("[BURMALDA v17.0] Loaded! ✅ Configs: " .. (hasFS and "ON" or "OFF (no filesystem)"))
