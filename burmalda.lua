@@ -1,6 +1,6 @@
 -- ================================================
---   🥔 BURMALDA HACK v17.0
---   ESP + Highlight + Tracer + Aimbot + FOV + Configs + HUD
+--   🥔 BURMALDA HACK v17.1
+--   ESP + Highlight + Tracer + Aimbot + FOV + Configs + PlayerList
 --   Toggle Menu: RightShift
 -- ================================================
 
@@ -35,12 +35,17 @@ local Config = {
     AimPriority="Distance", HitChance=100, HitboxExpand=0, StopOnKill=false,
     EnemyInventoryEnabled=true,
 
-    -- UI
-    WatermarkEnabled=true, WatermarkText="🥔 BURMALDA v17.0",
+    -- MISC
+    AntiAFK=true,
+    WatermarkEnabled=true, WatermarkText="🥔 BURMALDA v17.1",
     OpenBtnPosition=UDim2.new(0,20,0.5,-25),
     AnimationsEnabled=true, Theme="Classic",
     CurrentConfig="default",
+    WhitelistOnly=false,
 }
+
+-- Whitelist: список игроков которых подсвечивать (пусто = все)
+local Whitelist = {}
 
 local Themes = {
     Classic={name="🎨 Classic", bg=Color3.fromRGB(15,15,22), header=Color3.fromRGB(22,22,32), sidebar=Color3.fromRGB(18,18,26), content=Color3.fromRGB(24,24,34), contentHover=Color3.fromRGB(32,32,46), accent1=Color3.fromRGB(255,60,120), accent2=Color3.fromRGB(120,60,255), accent3=Color3.fromRGB(60,180,255), text=Color3.fromRGB(230,230,240), textDim=Color3.fromRGB(120,120,150), tabActive=Color3.fromRGB(30,30,44), tabInactive=Color3.fromRGB(22,22,32)},
@@ -54,7 +59,7 @@ local function T() return Themes[Config.Theme] or Themes.Classic end
 
 -- ================= CONFIG SYSTEM =================
 local ConfigFolder = "BurmaldaConfigs"
-local hasFS = (writefile and readfile and isfolder and makefolder and listfiles)
+local hasFS = (writefile and readfile and isfolder and makefolder and listfiles and isfile and delfile)
 
 local function ensureFolder()
     if not hasFS then return false end
@@ -64,7 +69,7 @@ end
 
 local function serializeValue(v)
     if typeof(v) == "Color3" then
-        return string.format("Color3.fromRGB(%d,%d,%d)", v.R*255, v.G*255, v.B*255)
+        return string.format("Color3.fromRGB(%d,%d,%d)", math.floor(v.R*255), math.floor(v.G*255), math.floor(v.B*255))
     elseif typeof(v) == "UDim2" then
         return string.format("UDim2.new(%f,%d,%f,%d)", v.X.Scale, v.X.Offset, v.Y.Scale, v.Y.Offset)
     elseif typeof(v) == "EnumItem" then
@@ -78,12 +83,12 @@ local function serializeValue(v)
 end
 
 local function saveConfig(name)
-    if not ensureFolder() then
-        return false, "Executor не поддерживает файлы"
-    end
+    if not ensureFolder() then return false, "Executor не поддерживает файлы" end
     local lines = {"return {"}
     for k, v in pairs(Config) do
-        table.insert(lines, string.format("  [%q] = %s,", k, serializeValue(v)))
+        if k ~= "AimKey" then
+            table.insert(lines, string.format("  [%q] = %s,", k, serializeValue(v)))
+        end
     end
     table.insert(lines, "}")
     local ok, err = pcall(function()
@@ -100,7 +105,7 @@ local function loadConfig(name)
     local ok, data = pcall(function() return readfile(ConfigFolder .. "/" .. name .. ".lua") end)
     if not ok then return false, "Ошибка чтения" end
     local fn, err = loadstring(data)
-    if not fn then return false, "Ошибка парсинга: " .. tostring(err) end
+    if not fn then return false, "Ошибка парсинга" end
     local ok2, tbl = pcall(fn)
     if not ok2 or type(tbl) ~= "table" then return false, "Конфиг битый" end
     for k, v in pairs(tbl) do
@@ -123,7 +128,9 @@ end
 local function listConfigs()
     if not ensureFolder() then return {} end
     local out = {}
-    for _, f in ipairs(listfiles(ConfigFolder)) do
+    local ok, files = pcall(listfiles, ConfigFolder)
+    if not ok or not files then return out end
+    for _, f in ipairs(files) do
         local n = f:match("([^/\\]+)%.lua$")
         if n then table.insert(out, n) end
     end
@@ -144,6 +151,47 @@ ESPGui.ResetOnSpawn = false
 ESPGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ESPGui.IgnoreGuiInset = false
 ESPGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ================= NOTIFICATIONS =================
+local NotifContainer = Instance.new("Frame")
+NotifContainer.Size = UDim2.new(0, 260, 0, 300)
+NotifContainer.Position = UDim2.new(1, -280, 0, 50)
+NotifContainer.BackgroundTransparency = 1
+NotifContainer.Parent = ScreenGui
+local NotifLayout = Instance.new("UIListLayout", NotifContainer)
+NotifLayout.Padding = UDim.new(0, 6)
+NotifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NotifLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+local function notify(text, color)
+    color = color or T().accent1
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, 0, 0, 34)
+    f.BackgroundColor3 = T().sidebar
+    f.BackgroundTransparency = 0.1
+    f.BorderSizePixel = 0
+    f.Parent = NotifContainer
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
+    local s = Instance.new("UIStroke", f)
+    s.Color = color
+    s.Thickness = 1
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -20, 1, 0)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = color
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 12
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = f
+    task.delay(3, function()
+        TweenService:Create(f, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+        TweenService:Create(lbl, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+        task.wait(0.35)
+        f:Destroy()
+    end)
+end
 
 -- ================= ESP FRAMES =================
 local ESPFrames = {}
@@ -257,6 +305,9 @@ local function hideESP(plr)
     f.weapon.Visible = false
     f.tracer.Visible = false
     if Highlights[plr] then Highlights[plr].Enabled = false end
+    if Skeletons[plr] then
+        for _, line in ipairs(Skeletons[plr]) do line.Visible = false end
+    end
 end
 
 local function updateHighlight(plr, char, visible)
@@ -287,6 +338,15 @@ local function isTeammate(plr)
     return plr.Team == LocalPlayer.Team
 end
 
+local function inWhitelist(plr)
+    if not Config.WhitelistOnly then return true end
+    if #Whitelist == 0 then return true end
+    for _, n in ipairs(Whitelist) do
+        if n == plr.Name then return true end
+    end
+    return false
+end
+
 local function isVisible(targetChar)
     if not targetChar then return false end
     local cam = workspace.CurrentCamera
@@ -313,7 +373,7 @@ local function isVisible(targetChar)
     return false
 end
 
--- Skeleton helper
+-- Skeleton
 local SKELETON_PAIRS = {
     {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},{"UpperTorso","LeftUpperArm"},
     {"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
@@ -388,7 +448,9 @@ RunService.RenderStepped:Connect(function()
 
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr == LocalPlayer then continue end
-        if not Config.ESPEnabled or isTeammate(plr) then hideESP(plr); continue end
+        if not Config.ESPEnabled or isTeammate(plr) or not inWhitelist(plr) then
+            hideESP(plr); continue
+        end
 
         local char = plr.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -433,7 +495,7 @@ RunService.RenderStepped:Connect(function()
             local boxW = maxX - minX
             local boxH = maxY - minY
 
-            -- BOX / FILL
+            -- BOX
             if Config.ShowBox then
                 if Config.BoxStyle == "Filled" then
                     f.box.Visible = false
@@ -595,6 +657,8 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ================= AIMBOT =================
+local TargetDot
+
 local function getAimPart(char)
     if not char then return nil end
     if Config.AimPart == "Head" then return char:FindFirstChild("Head")
@@ -629,7 +693,7 @@ local function getTarget()
     local center = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
     local best, bestScore = nil, math.huge
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer or isTeammate(plr) then continue end
+        if plr == LocalPlayer or isTeammate(plr) or not inWhitelist(plr) then continue end
         local char = plr.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -645,8 +709,6 @@ local function getTarget()
         if Config.AimPriority == "Health" then
             score = hum.Health
         elseif Config.AimPriority == "Crosshair" then
-            score = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-        elseif Config.AimPriority == "FOV" then
             score = (Vector2.new(sp.X, sp.Y) - center).Magnitude
         end
         if score < bestScore then
@@ -698,7 +760,6 @@ RunService.RenderStepped:Connect(function()
     if Config.AimbotEnabled and isAimActive() then
         local target = getTarget()
         if target and target.part then
-            -- StopOnKill
             if Config.StopOnKill and lastTarget and lastTarget.hum and lastTarget.hum.Health <= 0 then
                 aimHeld = false
                 aimToggled = false
@@ -707,7 +768,6 @@ RunService.RenderStepped:Connect(function()
             end
             lastTarget = target
 
-            -- Hit chance
             if Config.HitChance < 100 then
                 if math.random(1, 100) > Config.HitChance then return end
             end
@@ -743,9 +803,15 @@ end)
 RunService.RenderStepped:Connect(function()
     local cam = workspace.CurrentCamera
     if not cam then return end
-    if not (Config.AimbotEnabled and Config.ShowTarget and isAimActive()) then return end
+    if not (Config.AimbotEnabled and Config.ShowTarget and isAimActive()) then
+        if TargetDot then TargetDot.Visible = false end
+        return
+    end
     local t = getTarget()
-    if not t then return end
+    if not t then
+        if TargetDot then TargetDot.Visible = false end
+        return
+    end
     if not TargetDot then
         TargetDot = Instance.new("Frame")
         TargetDot.Size = UDim2.new(0, 8, 0, 8)
@@ -759,9 +825,21 @@ RunService.RenderStepped:Connect(function()
     local sp, on = cam:WorldToViewportPoint(t.part.Position)
     if on and sp.Z > 0 then
         TargetDot.Position = UDim2.new(0, sp.X, 0, sp.Y)
+        TargetDot.BackgroundColor3 = Config.TargetColor
         TargetDot.Visible = true
     else
         TargetDot.Visible = false
+    end
+end)
+
+-- ================= ANTI-AFK =================
+task.spawn(function()
+    while task.wait(60) do
+        if Config.AntiAFK then
+            local vu = game:GetService("VirtualUser")
+            pcall(function() vu:CaptureController() end)
+            pcall(function() vu:ClickButton2(Vector2.new()) end)
+        end
     end
 end)
 
@@ -863,7 +941,7 @@ local HeaderSub = Instance.new("TextLabel")
 HeaderSub.Size = UDim2.new(0, 220, 1, 0)
 HeaderSub.Position = UDim2.new(1, -270, 0, 0)
 HeaderSub.BackgroundTransparency = 1
-HeaderSub.Text = "v17.0"
+HeaderSub.Text = "v17.1"
 HeaderSub.TextColor3 = T().textDim
 HeaderSub.Font = Enum.Font.Gotham
 HeaderSub.TextSize = 12
@@ -1185,12 +1263,14 @@ createTab("ESP", "👁", 1)
 createTab("Aimbot", "🎯", 2)
 createTab("Visuals", "✨", 3)
 createTab("Colors", "🎨", 4)
-createTab("Settings", "⚙", 5)
+createTab("Players", "👥", 5)
+createTab("Settings", "⚙", 6)
 
 local espPage = createPage("ESP")
 local aimPage = createPage("Aimbot")
 local visPage = createPage("Visuals")
 local colPage = createPage("Colors")
+local plrPage = createPage("Players")
 local setPage = createPage("Settings")
 
 -- ESP
@@ -1298,6 +1378,28 @@ createToggle(aimPage, "Wall Check", Config.WallCheck, function(v) Config.WallChe
 createToggle(aimPage, "Toggle режим", Config.ToggleMode, function(v) Config.ToggleMode = v end)
 createToggle(aimPage, "Авто-выстрел", Config.AutoShoot, function(v) Config.AutoShoot = v end)
 createToggle(aimPage, "Стоп после убийства", Config.StopOnKill, function(v) Config.StopOnKill = v end)
+createSection(aimPage, "Клавиша активации")
+local keyBtn = createOption(aimPage, "Текущая: " .. Config.AimKeyString .. " (нажми чтобы сменить)", function(btn)
+    btn.Text = "Нажми любую клавишу..."
+    local conn
+    conn = UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.MouseButton2
+        or input.UserInputType == Enum.UserInputType.MouseButton3 then
+            Config.AimKey = input.UserInputType
+            Config.AimKeyString = input.UserInputType.Name
+        elseif input.KeyCode ~= Enum.KeyCode.Unknown then
+            Config.AimKey = input.KeyCode
+            Config.AimKeyString = input.KeyCode.Name
+        else
+            return
+        end
+        conn:Disconnect()
+        btn.Text = "Текущая: " .. Config.AimKeyString .. " (нажми чтобы сменить)"
+        notify("Клавиша изменена: " .. Config.AimKeyString, Color3.fromRGB(100,255,100))
+    end)
+end)
 
 -- VISUALS
 createSection(visPage, "Highlight")
@@ -1324,8 +1426,10 @@ createToggle(visPage, "Показывать FOV", Config.ShowFOV, function(v) Co
 createSlider(visPage, "FOV Transparency", 0, 1, Config.FOVTransparency, function(v) Config.FOVTransparency = v; FOVStroke.Transparency = v end)
 createSection(visPage, "Watermark")
 createToggle(visPage, "Показывать Watermark", Config.WatermarkEnabled, function(v) Config.WatermarkEnabled = v; Watermark.Visible = v end)
+createSection(visPage, "Misc")
+createToggle(visPage, "Anti-AFK", Config.AntiAFK, function(v) Config.AntiAFK = v end)
 
--- COLORS
+-- COLORS (все colorRow с исправленным синтаксисом)
 local function colorRow(parent, label, getter, setter)
     createSection(parent, label)
     local row = Instance.new("Frame")
@@ -1338,7 +1442,6 @@ local function colorRow(parent, label, getter, setter)
     lbl.Size = UDim2.new(1, -80, 1, 0)
     lbl.Position = UDim2.new(0, 16, 0, 0)
     lbl.BackgroundTransparency = 1
-    lbl.Text = "Текущий: RGB"
     lbl.TextColor3 = T().text
     lbl.Font = Enum.Font.Gotham
     lbl.TextSize = 13
@@ -1352,9 +1455,12 @@ local function colorRow(parent, label, getter, setter)
     swatch.Parent = row
     Instance.new("UICorner", swatch).CornerRadius = UDim.new(0, 6)
 
-    local sliders = {}
+    local startC = getter()
+    lbl.Text = string.format("RGB(%d,%d,%d)", math.floor(startC.R*255), math.floor(startC.G*255), math.floor(startC.B*255))
+
     for i, ch in ipairs({"R","G","B"}) do
-        local val = ({getter().R, getter().G, getter().B})[i] * 255
+        local c0 = getter()
+        local val = ({c0.R, c0.G, c0.B})[i] * 255
         createSlider(parent, "  " .. ch, 0, 255, val, function(v)
             local c = getter()
             local comps = {c.R*255, c.G*255, c.B*255}
@@ -1362,10 +1468,9 @@ local function colorRow(parent, label, getter, setter)
             local newC = Color3.fromRGB(comps[1], comps[2], comps[3])
             setter(newC)
             swatch.BackgroundColor3 = newC
-            lbl.Text = string.format("RGB(%d,%d,%d)", comps[1], comps[2], comps[3])
+            lbl.Text = string.format("RGB(%d,%d,%d)", math.floor(comps[1]), math.floor(comps[2]), math.floor(comps[3]))
         end)
     end
-    lbl.Text = string.format("RGB(%d,%d,%d)", getter().R*255, getter().G*255, getter().B*255)
 end
 
 colorRow(colPage, "ESP Color", function() return Config.ESPColor end, function(c) Config.ESPColor = c end)
@@ -1376,8 +1481,75 @@ colorRow(colPage, "Tracer Color", function() return Config.TracerColor end, func
 colorRow(colPage, "Highlight Fill", function() return Config.HighlightFillColor end, function(c) Config.HighlightFillColor = c end)
 colorRow(colPage, "Highlight Outline", function() return Config.HighlightOutlineColor end, function(c) Config.HighlightOutlineColor = c end)
 colorRow(colPage, "Skeleton", function() return Config.SkeletonColor end, function(c) Config.SkeletonColor = c end)
-colorRow(colPage, "FOV Color", function() return Config.FOVColor end, function(c) Config.FOVColor = c end; FOVStroke.Color = c end)
+colorRow(colPage, "FOV Color", function() return Config.FOVColor end, function(c)
+    Config.FOVColor = c
+    FOVStroke.Color = c
+end)
 colorRow(colPage, "Target Color", function() return Config.TargetColor end, function(c) Config.TargetColor = c end)
+
+-- PLAYERS
+createSection(plrPage, "Whitelist")
+createToggle(plrPage, "Только из списка", Config.WhitelistOnly, function(v) Config.WhitelistOnly = v end)
+local PlayerListFrame = Instance.new("Frame")
+PlayerListFrame.Size = UDim2.new(1, 0, 0, 300)
+PlayerListFrame.BackgroundColor3 = T().content
+PlayerListFrame.BorderSizePixel = 0
+PlayerListFrame.Parent = plrPage
+Instance.new("UICorner", PlayerListFrame).CornerRadius = UDim.new(0, 12)
+local plrScroll = Instance.new("ScrollingFrame", PlayerListFrame)
+plrScroll.Size = UDim2.new(1, 0, 1, 0)
+plrScroll.BackgroundTransparency = 1
+plrScroll.BorderSizePixel = 0
+plrScroll.ScrollBarThickness = 4
+plrScroll.ScrollBarImageColor3 = T().accent1
+plrScroll.CanvasSize = UDim2.new(0,0,0,0)
+plrScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+local plrLayout = Instance.new("UIListLayout", plrScroll)
+plrLayout.Padding = UDim.new(0, 4)
+local plrPad = Instance.new("UIPadding", plrScroll)
+plrPad.PaddingTop = UDim.new(0, 8)
+plrPad.PaddingLeft = UDim.new(0, 8)
+plrPad.PaddingRight = UDim.new(0, 8)
+
+local function inWL(name)
+    for _, n in ipairs(Whitelist) do
+        if n == name then return true end
+    end
+    return false
+end
+
+local function refreshPlayerList()
+    for _, c in ipairs(plrScroll:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, 0, 0, 34)
+        b.BackgroundColor3 = inWL(plr.Name) and T().accent1 or T().contentHover
+        b.Text = (inWL(plr.Name) and "✅ " or "⬜ ") .. plr.Name
+        b.TextColor3 = Color3.fromRGB(255,255,255)
+        b.Font = Enum.Font.Gotham
+        b.TextSize = 13
+        b.BorderSizePixel = 0
+        b.AutoButtonColor = false
+        b.Parent = plrScroll
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+        b.MouseButton1Click:Connect(function()
+            if inWL(plr.Name) then
+                for i, n in ipairs(Whitelist) do
+                    if n == plr.Name then table.remove(Whitelist, i); break end
+                end
+            else
+                table.insert(Whitelist, plr.Name)
+            end
+            refreshPlayerList()
+        end)
+    end
+end
+refreshPlayerList()
+Players.PlayerAdded:Connect(refreshPlayerList)
+Players.PlayerRemoving:Connect(function() task.wait(0.1); refreshPlayerList() end)
 
 -- SETTINGS / CONFIGS
 createSection(setPage, "Тема")
@@ -1421,7 +1593,6 @@ local cfgLayout = Instance.new("UIListLayout", cfgRow)
 cfgLayout.FillDirection = Enum.FillDirection.Horizontal
 cfgLayout.Padding = UDim.new(0, 6)
 cfgLayout.SortOrder = Enum.SortOrder.LayoutOrder
-cfgLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 
 local function mkBtn(text, color)
     local b = Instance.new("TextButton")
@@ -1441,7 +1612,7 @@ end
 local SaveBtn = mkBtn("💾 Сохранить", T().accent1)
 local LoadBtn = mkBtn("📂 Загрузить")
 local DeleteBtn = mkBtn("🗑 Удалить", Color3.fromRGB(180,50,50))
-local RefreshBtn = mkBtn("🔄 Обновить список")
+local RefreshBtn = mkBtn("🔄 Обновить")
 
 local ConfigList = Instance.new("Frame")
 ConfigList.Size = UDim2.new(1, 0, 0, 160)
@@ -1449,14 +1620,6 @@ ConfigList.BackgroundColor3 = T().content
 ConfigList.BorderSizePixel = 0
 ConfigList.Parent = setPage
 Instance.new("UICorner", ConfigList).CornerRadius = UDim.new(0, 12)
-local listLayout = Instance.new("UIListLayout", ConfigList)
-listLayout.Padding = UDim.new(0, 4)
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-local listPad = Instance.new("UIPadding", ConfigList)
-listPad.PaddingTop = UDim.new(0, 8)
-listPad.PaddingBottom = UDim.new(0, 8)
-listPad.PaddingLeft = UDim.new(0, 8)
-listPad.PaddingRight = UDim.new(0, 8)
 local listScroll = Instance.new("ScrollingFrame", ConfigList)
 listScroll.Size = UDim2.new(1, 0, 1, 0)
 listScroll.BackgroundTransparency = 1
@@ -1467,7 +1630,10 @@ listScroll.CanvasSize = UDim2.new(0,0,0,0)
 listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 local lsLayout = Instance.new("UIListLayout", listScroll)
 lsLayout.Padding = UDim.new(0, 4)
-lsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local lsPad = Instance.new("UIPadding", listScroll)
+lsPad.PaddingTop = UDim.new(0, 8)
+lsPad.PaddingLeft = UDim.new(0, 8)
+lsPad.PaddingRight = UDim.new(0, 8)
 
 local function refreshConfigList()
     for _, c in ipairs(listScroll:GetChildren()) do
@@ -1513,10 +1679,12 @@ SaveBtn.MouseButton1Click:Connect(function()
         ConfigStatusLbl.Text = "✅ Сохранено: " .. name
         ConfigStatusLbl.TextColor3 = Color3.fromRGB(100,255,100)
         Config.CurrentConfig = name
+        notify("Сохранено: " .. name, Color3.fromRGB(100,255,100))
         refreshConfigList()
     else
         ConfigStatusLbl.Text = "❌ " .. tostring(err)
         ConfigStatusLbl.TextColor3 = Color3.fromRGB(255,100,100)
+        notify("Ошибка: " .. tostring(err), Color3.fromRGB(255,100,100))
     end
 end)
 
@@ -1528,10 +1696,12 @@ LoadBtn.MouseButton1Click:Connect(function()
         ConfigStatusLbl.Text = "✅ Загружено: " .. name
         ConfigStatusLbl.TextColor3 = Color3.fromRGB(100,255,100)
         applyTheme()
+        notify("Загружено: " .. name, Color3.fromRGB(100,255,100))
         refreshConfigList()
     else
         ConfigStatusLbl.Text = "❌ " .. tostring(err)
         ConfigStatusLbl.TextColor3 = Color3.fromRGB(255,100,100)
+        notify("Ошибка: " .. tostring(err), Color3.fromRGB(255,100,100))
     end
 end)
 
@@ -1540,6 +1710,7 @@ DeleteBtn.MouseButton1Click:Connect(function()
     if deleteConfig(name) then
         ConfigStatusLbl.Text = "🗑 Удалён: " .. name
         ConfigStatusLbl.TextColor3 = Color3.fromRGB(255,200,100)
+        notify("Удалён: " .. name, Color3.fromRGB(255,200,100))
         refreshConfigList()
     else
         ConfigStatusLbl.Text = "❌ Не найден: " .. name
@@ -1613,4 +1784,5 @@ end)
 OpenBtn.Visible = false
 switchTab("ESP")
 openMenu()
-print("[BURMALDA v17.0] Loaded! ✅ Configs: " .. (hasFS and "ON" or "OFF (no filesystem)"))
+notify("BURMALDA v17.1 загружен", Color3.fromRGB(100,255,100))
+print("[BURMALDA v17.1] Loaded! ✅ Configs: " .. (hasFS and "ON" or "OFF"))
