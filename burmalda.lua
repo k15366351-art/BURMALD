@@ -1,6 +1,6 @@
 -- ================================================
---   🥔 BURMALDA HACK v17.1
---   ESP + Highlight + Tracer + Aimbot + FOV + Configs + PlayerList
+--   🥔 BURMALDA HACK v18.0
+--   Full ESP + Aimbot + Configs + PlayerList
 --   Toggle Menu: RightShift
 -- ================================================
 
@@ -21,30 +21,38 @@ local Config = {
     NameColor=Color3.fromRGB(255,255,255), DistColor=Color3.fromRGB(220,220,220),
     TracerColor=Color3.fromRGB(255,60,120), TracerOrigin="Bottom",
     BoxThickness=2, BoxPadding=2, BoxFillTransparency=0.7,
+    BoxCornerLength=10, BoxCornerThickness=2,
     HealthMode="Both", HealthBarWidth=5, HealthBarSide="Left", ShowHealthText=true,
     HighlightFillColor=Color3.fromRGB(255,60,120), HighlightFillTransparency=0.6,
     HighlightOutlineColor=Color3.fromRGB(255,255,255), HighlightOutlineTransparency=0.3,
     SkeletonColor=Color3.fromRGB(255,255,255),
+    ShowOffscreenArrows=false, OffscreenArrowColor=Color3.fromRGB(255,60,120),
 
     -- AIMBOT
     AimbotEnabled=false, AimKey=Enum.UserInputType.MouseButton2, AimKeyString="MouseButton2",
     AimMode="Camera", AimPart="Head", FOV=150, SmoothnessX=0.25, SmoothnessY=0.25,
+    SmoothingStyle="Linear",
     ShowFOV=false, FOVColor=Color3.fromRGB(255,255,255), FOVTransparency=0.8,
+    FOVShape="Circle",
     MaxAimDist=600, WallCheck=false, ToggleMode=false,
     Prediction=0, AutoShoot=false, ShowTarget=true, TargetColor=Color3.fromRGB(255,60,120),
-    AimPriority="Distance", HitChance=100, HitboxExpand=0, StopOnKill=false,
+    AimPriority="Distance", AimPriorityEnabled=true,
+    HitChance=100, HitboxExpand=0, StopOnKill=false,
+    TriggerBot=false, TriggerBotDelay=50,
+    Randomization=0,
     EnemyInventoryEnabled=true,
 
     -- MISC
     AntiAFK=true,
-    WatermarkEnabled=true, WatermarkText="🥔 BURMALDA v17.1",
+    WatermarkEnabled=true, WatermarkText="🥔 BURMALDA v18.0",
     OpenBtnPosition=UDim2.new(0,20,0.5,-25),
     AnimationsEnabled=true, Theme="Classic",
     CurrentConfig="default",
     WhitelistOnly=false,
+    AutoLoadConfig=false,
+    AutoSaveConfig=false,
 }
 
--- Whitelist: список игроков которых подсвечивать (пусто = все)
 local Whitelist = {}
 
 local Themes = {
@@ -82,11 +90,36 @@ local function serializeValue(v)
     return "nil"
 end
 
+-- Ссылки на UI элементы для синхронизации
+local AllToggles = {}
+local AllSliders = {}
+local AllOptions = {}
+
+function refreshAllUI()
+    for key, slider in pairs(AllSliders) do
+        local val = Config[key]
+        if type(val) == "number" then slider.set(val) end
+    end
+    for key, toggle in pairs(AllToggles) do
+        local val = Config[key]
+        if type(val) == "boolean" then toggle.set(val, false) end
+    end
+    for key, opts in pairs(AllOptions) do
+        local curVal = Config[key]
+        for val, btn in pairs(opts) do
+            local active = (val == curVal)
+            TweenService:Create(btn, TweenInfo.new(0.15), {
+                BackgroundColor3 = active and T().accent1 or T().content}):Play()
+        end
+    end
+    if FOVCircle then FOVCircle.Visible = Config.ShowFOV or false end
+end
+
 local function saveConfig(name)
     if not ensureFolder() then return false, "Executor не поддерживает файлы" end
     local lines = {"return {"}
     for k, v in pairs(Config) do
-        if k ~= "AimKey" then
+        if k ~= "AimKey" and k ~= "OpenBtnPosition" and type(v) ~= "function" and type(v) ~= "table" then
             table.insert(lines, string.format("  [%q] = %s,", k, serializeValue(v)))
         end
     end
@@ -112,6 +145,7 @@ local function loadConfig(name)
         if Config[k] ~= nil then Config[k] = v end
     end
     Config.CurrentConfig = name
+    if refreshAllUI then refreshAllUI() end
     return true
 end
 
@@ -149,7 +183,7 @@ local ESPGui = Instance.new("ScreenGui")
 ESPGui.Name = "BurmaldaESP"
 ESPGui.ResetOnSpawn = false
 ESPGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ESPGui.IgnoreGuiInset = false
+ESPGui.IgnoreGuiInset = true
 ESPGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ================= NOTIFICATIONS =================
@@ -186,10 +220,12 @@ local function notify(text, color)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = f
     task.delay(3, function()
-        TweenService:Create(f, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
-        TweenService:Create(lbl, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
-        task.wait(0.35)
-        f:Destroy()
+        if f and f.Parent then
+            TweenService:Create(f, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(lbl, TweenInfo.new(0.3), {TextTransparency = 1}):Play()
+            task.wait(0.35)
+            f:Destroy()
+        end
     end)
 end
 
@@ -197,6 +233,9 @@ end
 local ESPFrames = {}
 local Highlights = {}
 local Skeletons = {}
+local OffscreenArrows = {}
+
+local CORNER_KEYS = {"tlH","tlV","trH","trV","blH","blV","brH","brV"}
 
 local function createESPFrames(plr)
     if ESPFrames[plr] then return ESPFrames[plr] end
@@ -219,6 +258,18 @@ local function createESPFrames(plr)
     f.boxFill.Visible = false
     f.boxFill.ZIndex = 1
     f.boxFill.Parent = ESPGui
+
+    -- Уголки
+    f.corners = {}
+    for _, k in ipairs(CORNER_KEYS) do
+        local fr = Instance.new("Frame")
+        fr.BorderSizePixel = 0
+        fr.Visible = false
+        fr.ZIndex = 4
+        fr.BackgroundColor3 = Config.ESPColor
+        fr.Parent = ESPGui
+        f.corners[k] = fr
+    end
 
     f.hpBg = Instance.new("Frame")
     f.hpBg.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
@@ -297,6 +348,9 @@ local function hideESP(plr)
     if not f then return end
     f.box.Visible = false
     f.boxFill.Visible = false
+    for _, k in ipairs(CORNER_KEYS) do
+        if f.corners[k] then f.corners[k].Visible = false end
+    end
     f.hpBg.Visible = false
     f.hpFill.Visible = false
     f.name.Visible = false
@@ -308,9 +362,7 @@ local function hideESP(plr)
     if Skeletons[plr] then
         for _, line in ipairs(Skeletons[plr]) do line.Visible = false end
     end
-end
-
-local function updateHighlight(plr, char, visible)
+endlocal function updateHighlight(plr, char, visible)
     if not Config.ShowHighlight then
         if Highlights[plr] then Highlights[plr].Enabled = false end
         return
@@ -385,12 +437,10 @@ local SKELETON_PAIRS_R6 = {
     {"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},
     {"Torso","Left Leg"},{"Torso","Right Leg"},
 }
-
 local function getSkeletonPairs(char)
     if char:FindFirstChild("UpperTorso") then return SKELETON_PAIRS end
     return SKELETON_PAIRS_R6
 end
-
 local function drawSkeleton(plr, char, cam, color)
     if not Config.ShowSkeleton then
         if Skeletons[plr] then
@@ -441,6 +491,25 @@ local function drawSkeleton(plr, char, cam, color)
     end
 end
 
+-- Off-screen arrows
+local function getOffscreenArrow(plr)
+    if not OffscreenArrows[plr] then
+        local arrow = Instance.new("TextLabel")
+        arrow.Size = UDim2.new(0, 30, 0, 30)
+        arrow.BackgroundTransparency = 1
+        arrow.Text = "➤"
+        arrow.TextColor3 = Config.OffscreenArrowColor
+        arrow.Font = Enum.Font.GothamBold
+        arrow.TextSize = 24
+        arrow.TextStrokeTransparency = 0
+        arrow.Visible = false
+        arrow.ZIndex = 15
+        arrow.Parent = ESPGui
+        OffscreenArrows[plr] = arrow
+    end
+    return OffscreenArrows[plr]
+end
+
 -- ================= ESP LOOP =================
 RunService.RenderStepped:Connect(function()
     local cam = workspace.CurrentCamera
@@ -482,16 +551,19 @@ RunService.RenderStepped:Connect(function()
         local minX, minY = math.huge, math.huge
         local maxX, maxY = -math.huge, -math.huge
         local ok = true
+        local onScreen = false
         for _, v in ipairs(verts) do
             local sp, on = cam:WorldToViewportPoint(v)
-            if not on or sp.Z <= 0 then ok = false; break end
-            if sp.X < minX then minX = sp.X end
-            if sp.Y < minY then minY = sp.Y end
-            if sp.X > maxX then maxX = sp.X end
-            if sp.Y > maxY then maxY = sp.Y end
+            if on and sp.Z > 0 then
+                onScreen = true
+                if sp.X < minX then minX = sp.X end
+                if sp.Y < minY then minY = sp.Y end
+                if sp.X > maxX then maxX = sp.X end
+                if sp.Y > maxY then maxY = sp.Y end
+            end
         end
 
-        if ok and maxX > minX and maxY > minY and (maxX-minX) < 800 then
+        if ok and onScreen and maxX > minX and maxY > minY and (maxX-minX) < 800 then
             local boxW = maxX - minX
             local boxH = maxY - minY
 
@@ -499,13 +571,49 @@ RunService.RenderStepped:Connect(function()
             if Config.ShowBox then
                 if Config.BoxStyle == "Filled" then
                     f.box.Visible = false
+                    for _, k in ipairs(CORNER_KEYS) do f.corners[k].Visible = false end
                     f.boxFill.Size = UDim2.new(0, boxW, 0, boxH)
                     f.boxFill.Position = UDim2.new(0, minX, 0, minY)
                     f.boxFill.BackgroundColor3 = color
                     f.boxFill.BackgroundTransparency = Config.BoxFillTransparency
                     f.boxFill.Visible = true
-                else
+                elseif Config.BoxStyle == "Corners" then
                     f.boxFill.Visible = false
+                    f.box.Visible = false
+                    local cl = Config.BoxCornerLength
+                    local ct = Config.BoxCornerThickness
+                    -- tlH
+                    f.corners.tlH.Size = UDim2.new(0, cl, 0, ct)
+                    f.corners.tlH.Position = UDim2.new(0, minX, 0, minY)
+                    -- tlV
+                    f.corners.tlV.Size = UDim2.new(0, ct, 0, cl)
+                    f.corners.tlV.Position = UDim2.new(0, minX, 0, minY)
+                    -- trH
+                    f.corners.trH.Size = UDim2.new(0, cl, 0, ct)
+                    f.corners.trH.Position = UDim2.new(0, maxX - cl, 0, minY)
+                    -- trV
+                    f.corners.trV.Size = UDim2.new(0, ct, 0, cl)
+                    f.corners.trV.Position = UDim2.new(0, maxX - ct, 0, minY)
+                    -- blH
+                    f.corners.blH.Size = UDim2.new(0, cl, 0, ct)
+                    f.corners.blH.Position = UDim2.new(0, minX, 0, maxY - ct)
+                    -- blV
+                    f.corners.blV.Size = UDim2.new(0, ct, 0, cl)
+                    f.corners.blV.Position = UDim2.new(0, minX, 0, maxY - cl)
+                    -- brH
+                    f.corners.brH.Size = UDim2.new(0, cl, 0, ct)
+                    f.corners.brH.Position = UDim2.new(0, maxX - cl, 0, maxY - ct)
+                    -- brV
+                    f.corners.brV.Size = UDim2.new(0, ct, 0, cl)
+                    f.corners.brV.Position = UDim2.new(0, maxX - ct, 0, maxY - cl)
+                    for _, k in ipairs(CORNER_KEYS) do
+                        f.corners[k].BackgroundColor3 = color
+                        f.corners[k].Visible = true
+                    end
+                else
+                    -- 2D
+                    f.boxFill.Visible = false
+                    for _, k in ipairs(CORNER_KEYS) do f.corners[k].Visible = false end
                     f.box.Size = UDim2.new(0, boxW, 0, boxH)
                     f.box.Position = UDim2.new(0, minX, 0, minY)
                     f.box.Visible = true
@@ -515,6 +623,7 @@ RunService.RenderStepped:Connect(function()
             else
                 f.box.Visible = false
                 f.boxFill.Visible = false
+                for _, k in ipairs(CORNER_KEYS) do f.corners[k].Visible = false end
             end
 
             -- SKELETON
@@ -650,8 +759,30 @@ RunService.RenderStepped:Connect(function()
             else
                 f.tracer.Visible = false
             end
+
+            -- Offscreen arrow (если игрок за экраном)
+            if Config.ShowOffscreenArrows then
+                local arrow = getOffscreenArrow(plr)
+                local sp, on = cam:WorldToViewportPoint(hrp.Position)
+                if not on or sp.Z <= 0 then
+                    arrow.Visible = true
+                    arrow.BackgroundColor3 = Config.OffscreenArrowColor
+                    arrow.TextColor3 = Config.OffscreenArrowColor
+                    -- Позиция стрелки — по краю экрана
+                    local dir2 = Vector2.new(hrp.Position.X - cam.CFrame.Position.X, hrp.Position.Z - cam.CFrame.Position.Z)
+                    local angle = math.deg(math.atan2(-dir2.Y, dir2.X))
+                    local radiusX, radiusY = cam.ViewportSize.X/2 - 30, cam.ViewportSize.Y/2 - 30
+                    local rx = math.cos(math.rad(angle)) * radiusX
+                    local ry = math.sin(math.rad(angle)) * radiusY
+                    arrow.Position = UDim2.new(0, cam.ViewportSize.X/2 + rx - 15, 0, cam.ViewportSize.Y/2 + ry - 15)
+                    arrow.Rotation = angle
+                else
+                    arrow.Visible = false
+                end
+            end
         else
             hideESP(plr)
+            if OffscreenArrows[plr] then OffscreenArrows[plr].Visible = false end
         end
     end
 end)
@@ -706,10 +837,12 @@ local function getTarget()
         if not on or sp.Z <= 0 then continue end
         if (Vector2.new(sp.X, sp.Y) - center).Magnitude > Config.FOV then continue end
         local score = (cam.CFrame.Position - hrp.Position).Magnitude
-        if Config.AimPriority == "Health" then
-            score = hum.Health
-        elseif Config.AimPriority == "Crosshair" then
-            score = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+        if Config.AimPriorityEnabled then
+            if Config.AimPriority == "Health" then
+                score = hum.Health
+            elseif Config.AimPriority == "Crosshair" then
+                score = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+            end
         end
         if score < bestScore then
             bestScore = score
@@ -774,6 +907,15 @@ RunService.RenderStepped:Connect(function()
 
             local currentCF = cam.CFrame
             local aimPos = predictPosition(target.part)
+            -- Randomization
+            if Config.Randomization > 0 then
+                local r = Config.Randomization / 100
+                aimPos = aimPos + Vector3.new(
+                    (math.random() - 0.5) * r,
+                    (math.random() - 0.5) * r,
+                    (math.random() - 0.5) * r
+                )
+            end
             local desiredCF
             if Config.AimMode == "Mouse" then
                 local sp = cam:WorldToViewportPoint(aimPos)
@@ -832,7 +974,34 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- ================= ANTI-AFK =================
+-- Trigger Bot
+task.spawn(function()
+    while task.wait(0.05) do
+        if Config.TriggerBot and Config.AimbotEnabled then
+            local cam = workspace.CurrentCamera
+            if not cam then continue end
+            local center = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr == LocalPlayer or isTeammate(plr) or not inWhitelist(plr) then continue end
+                local char = plr.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if not (hrp and hum and hum.Health > 0) then continue end
+                local sp, on = cam:WorldToViewportPoint(hrp.Position)
+                if on and sp.Z > 0 then
+                    if (Vector2.new(sp.X, sp.Y) - center).Magnitude < 30 then
+                        task.wait(Config.TriggerBotDelay / 1000)
+                        local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                        if tool then pcall(function() tool:Activate() end) end
+                        break
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Anti-AFK
 task.spawn(function()
     while task.wait(60) do
         if Config.AntiAFK then
@@ -841,9 +1010,7 @@ task.spawn(function()
             pcall(function() vu:ClickButton2(Vector2.new()) end)
         end
     end
-end)
-
--- ================= OPEN BTN =================
+end)-- ================= OPEN BTN =================
 local OpenBtn = Instance.new("TextButton")
 OpenBtn.Size = UDim2.new(0, 54, 0, 54)
 OpenBtn.Position = Config.OpenBtnPosition
@@ -941,7 +1108,7 @@ local HeaderSub = Instance.new("TextLabel")
 HeaderSub.Size = UDim2.new(0, 220, 1, 0)
 HeaderSub.Position = UDim2.new(1, -270, 0, 0)
 HeaderSub.BackgroundTransparency = 1
-HeaderSub.Text = "v17.1"
+HeaderSub.Text = "v18.0"
 HeaderSub.TextColor3 = T().textDim
 HeaderSub.Font = Enum.Font.Gotham
 HeaderSub.TextSize = 12
@@ -1079,7 +1246,7 @@ local function createSection(parent, text)
     lbl.Parent = frame
 end
 
-local function createToggle(parent, text, default, callback)
+local function createToggle(parent, text, default, callback, cfgKey)
     local Btn = Instance.new("TextButton")
     Btn.Size = UDim2.new(1, 0, 0, 42)
     Btn.BackgroundColor3 = T().content
@@ -1113,17 +1280,19 @@ local function createToggle(parent, text, default, callback)
     Dot.Parent = Indicator
     Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
     local state = default
-    Btn.MouseButton1Click:Connect(function()
-        state = not state
+    local function setState(newState, fire)
+        state = newState
         TweenService:Create(Indicator, TweenInfo.new(0.25), {
             BackgroundColor3 = state and T().accent1 or T().contentHover}):Play()
         TweenService:Create(Dot, TweenInfo.new(0.25, Enum.EasingStyle.Back), {
             Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)}):Play()
-        callback(state)
-    end)
+        if fire then callback(state) end
+    end
+    Btn.MouseButton1Click:Connect(function() setState(not state, true) end)
+    if cfgKey then AllToggles[cfgKey] = {set = setState, get = function() return state end} end
 end
 
-local function createSlider(parent, text, min, max, default, callback)
+local function createSlider(parent, text, min, max, default, callback, cfgKey)
     local Frame = Instance.new("Frame")
     Frame.Size = UDim2.new(1, 0, 0, 54)
     Frame.BackgroundColor3 = T().content
@@ -1171,34 +1340,46 @@ local function createSlider(parent, text, min, max, default, callback)
     Knob.Parent = BarBg
     Instance.new("UICorner", Knob).CornerRadius = UDim.new(1, 0)
     local dragging = false
-    local function setValue(alpha)
+    local function setValue(alpha, fire)
         alpha = math.clamp(alpha, 0, 1)
         local val = min + (max-min)*alpha
         BarFill.Size = UDim2.new(alpha, 0, 1, 0)
         Knob.Position = UDim2.new(alpha, -8, 0.5, -8)
         ValueLbl.Text = tostring(math.floor(val*100+0.5)/100)
-        callback(val)
+        if fire then callback(val) end
     end
     BarBg.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
-            setValue((input.Position.X - BarBg.AbsolutePosition.X) / BarBg.AbsoluteSize.X)
+            setValue((input.Position.X - BarBg.AbsolutePosition.X) / BarBg.AbsoluteSize.X, true)
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
         or input.UserInputType == Enum.UserInputType.Touch) then
-            setValue((input.Position.X - BarBg.AbsolutePosition.X) / BarBg.AbsoluteSize.X)
+            setValue((input.Position.X - BarBg.AbsolutePosition.X) / BarBg.AbsoluteSize.X, true)
         end
     end)
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
     end)
+    if cfgKey then
+        AllSliders[cfgKey] = {
+            set = function(val)
+                local a = (val - min) / (max - min)
+                setValue(a, false)
+            end,
+            get = function()
+                local a = BarFill.Size.X.Scale
+                return min + (max-min)*a
+            end
+        }
+    end
 end
 
-local function createOption(parent, text, callback)
+local function createOption(parent, text, callback, cfgKey, cfgValue)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, 0, 0, 38)
     btn.BackgroundColor3 = T().content
@@ -1211,6 +1392,10 @@ local function createOption(parent, text, callback)
     btn.Parent = parent
     Instance.new("UICorner", btn).CornerRadius = UDim.new(1, 0)
     btn.MouseButton1Click:Connect(function() callback(btn) end)
+    if cfgKey and cfgValue then
+        AllOptions[cfgKey] = AllOptions[cfgKey] or {}
+        AllOptions[cfgKey][cfgValue] = btn
+    end
     return btn
 end
 
@@ -1275,18 +1460,19 @@ local setPage = createPage("Settings")
 
 -- ESP
 createSection(espPage, "Основное")
-createToggle(espPage, "ESP Включён", Config.ESPEnabled, function(v) Config.ESPEnabled = v end)
-createToggle(espPage, "Проверка команды", Config.TeamCheck, function(v) Config.TeamCheck = v end)
+createToggle(espPage, "ESP Включён", Config.ESPEnabled, function(v) Config.ESPEnabled = v end, "ESPEnabled")
+createToggle(espPage, "Проверка команды", Config.TeamCheck, function(v) Config.TeamCheck = v end, "TeamCheck")
 createSection(espPage, "Отображение")
-createToggle(espPage, "Боксы", Config.ShowBox, function(v) Config.ShowBox = v end)
-createToggle(espPage, "Скелет", Config.ShowSkeleton, function(v) Config.ShowSkeleton = v end)
-createToggle(espPage, "Имена", Config.ShowName, function(v) Config.ShowName = v end)
-createToggle(espPage, "Команда", Config.ShowTeam, function(v) Config.ShowTeam = v end)
-createToggle(espPage, "HP", Config.ShowHealth, function(v) Config.ShowHealth = v end)
-createToggle(espPage, "Дистанция", Config.ShowDistance, function(v) Config.ShowDistance = v end)
-createToggle(espPage, "Оружие врага", Config.EnemyInventoryEnabled, function(v) Config.EnemyInventoryEnabled = v end)
+createToggle(espPage, "Боксы", Config.ShowBox, function(v) Config.ShowBox = v end, "ShowBox")
+createToggle(espPage, "Скелет", Config.ShowSkeleton, function(v) Config.ShowSkeleton = v end, "ShowSkeleton")
+createToggle(espPage, "Имена", Config.ShowName, function(v) Config.ShowName = v end, "ShowName")
+createToggle(espPage, "Команда", Config.ShowTeam, function(v) Config.ShowTeam = v end, "ShowTeam")
+createToggle(espPage, "HP", Config.ShowHealth, function(v) Config.ShowHealth = v end, "ShowHealth")
+createToggle(espPage, "Дистанция", Config.ShowDistance, function(v) Config.ShowDistance = v end, "ShowDistance")
+createToggle(espPage, "Оружие врага", Config.EnemyInventoryEnabled, function(v) Config.EnemyInventoryEnabled = v end, "EnemyInventoryEnabled")
+createToggle(espPage, "Стрелки за экраном", Config.ShowOffscreenArrows, function(v) Config.ShowOffscreenArrows = v end, "ShowOffscreenArrows")
 createSection(espPage, "Стиль боксов")
-local boxStyles = {{name="2D", value="2D"}, {name="Filled", value="Filled"}}
+local boxStyles = {{name="2D", value="2D"}, {name="Filled", value="Filled"}, {name="Corners", value="Corners"}}
 local boxBtns = {}
 for _, opt in ipairs(boxStyles) do
     local b = createOption(espPage, opt.name, function(btn)
@@ -1295,14 +1481,16 @@ for _, opt in ipairs(boxStyles) do
             TweenService:Create(btn2, TweenInfo.new(0.15), {
                 BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
         end
-    end)
+    end, "BoxStyle", opt.value)
     if opt.value == Config.BoxStyle then b.BackgroundColor3 = T().accent1 end
     boxBtns[opt.value] = b
 end
-createSlider(espPage, "Толщина обводки", 1, 5, Config.BoxThickness, function(v) Config.BoxThickness = v end)
-createSlider(espPage, "Прозрачность заливки", 0, 1, Config.BoxFillTransparency, function(v) Config.BoxFillTransparency = v end)
+createSlider(espPage, "Толщина обводки", 1, 5, Config.BoxThickness, function(v) Config.BoxThickness = v end, "BoxThickness")
+createSlider(espPage, "Длина уголков", 3, 30, Config.BoxCornerLength, function(v) Config.BoxCornerLength = v end, "BoxCornerLength")
+createSlider(espPage, "Толщина уголков", 1, 6, Config.BoxCornerThickness, function(v) Config.BoxCornerThickness = v end, "BoxCornerThickness")
+createSlider(espPage, "Прозрачность заливки", 0, 1, Config.BoxFillTransparency, function(v) Config.BoxFillTransparency = v end, "BoxFillTransparency")
 createSection(espPage, "Wall Sense")
-createToggle(espPage, "Умная подсветка", Config.UseWallColors, function(v) Config.UseWallColors = v end)
+createToggle(espPage, "Умная подсветка", Config.UseWallColors, function(v) Config.UseWallColors = v end, "UseWallColors")
 createSection(espPage, "HP-полоска")
 local hpModes = {{name="🔢 Цифры", value="Numbers"}, {name="📊 Полоска", value="Bar"}, {name="🔢📊 Оба", value="Both"}}
 local hpBtns = {}
@@ -1313,24 +1501,34 @@ for _, opt in ipairs(hpModes) do
             TweenService:Create(btn2, TweenInfo.new(0.15), {
                 BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
         end
-    end)
+    end, "HealthMode", opt.value)
     if opt.value == Config.HealthMode then b.BackgroundColor3 = T().accent1 end
     hpBtns[opt.value] = b
 end
-createSlider(espPage, "Толщина HP", 3, 15, Config.HealthBarWidth, function(v) Config.HealthBarWidth = v end)
-createSlider(espPage, "Макс. дистанция", 50, 3000, Config.MaxDistance, function(v) Config.MaxDistance = v end)
+createSlider(espPage, "Толщина HP", 3, 15, Config.HealthBarWidth, function(v) Config.HealthBarWidth = v end, "HealthBarWidth")
+createSlider(espPage, "Макс. дистанция", 50, 3000, Config.MaxDistance, function(v) Config.MaxDistance = v end, "MaxDistance")
 
 -- AIMBOT
 createSection(aimPage, "Основное")
-createToggle(aimPage, "Aimbot Включён", Config.AimbotEnabled, function(v) Config.AimbotEnabled = v end)
-createToggle(aimPage, "Показывать цель", Config.ShowTarget, function(v) Config.ShowTarget = v end)
+createToggle(aimPage, "Aimbot Включён", Config.AimbotEnabled, function(v) Config.AimbotEnabled = v end, "AimbotEnabled")
+createToggle(aimPage, "Показывать цель", Config.ShowTarget, function(v) Config.ShowTarget = v end, "ShowTarget")
+createSection(aimPage, "FOV")
+createSlider(aimPage, "FOV", 20, 600, Config.FOV, function(v) Config.FOV = v end, "FOV")
+createToggle(aimPage, "Показать FOV круг", Config.ShowFOV, function(v)
+    Config.ShowFOV = v
+    FOVCircle.Visible = v
+end, "ShowFOV")
+createSlider(aimPage, "FOV Transparency", 0, 1, Config.FOVTransparency, function(v)
+    Config.FOVTransparency = v
+    FOVStroke.Transparency = v
+end, "FOVTransparency")
 createSection(aimPage, "Точность")
-createSlider(aimPage, "FOV", 20, 600, Config.FOV, function(v) Config.FOV = v end)
-createSlider(aimPage, "Smoothness X", 0, 0.95, Config.SmoothnessX, function(v) Config.SmoothnessX = v end)
-createSlider(aimPage, "Smoothness Y", 0, 0.95, Config.SmoothnessY, function(v) Config.SmoothnessY = v end)
-createSlider(aimPage, "Prediction", 0, 500, Config.Prediction, function(v) Config.Prediction = v end)
-createSlider(aimPage, "Hit Chance %", 0, 100, Config.HitChance, function(v) Config.HitChance = v end)
-createSlider(aimPage, "Max Aim Dist", 50, 2000, Config.MaxAimDist, function(v) Config.MaxAimDist = v end)
+createSlider(aimPage, "Smoothness X", 0, 0.95, Config.SmoothnessX, function(v) Config.SmoothnessX = v end, "SmoothnessX")
+createSlider(aimPage, "Smoothness Y", 0, 0.95, Config.SmoothnessY, function(v) Config.SmoothnessY = v end, "SmoothnessY")
+createSlider(aimPage, "Prediction", 0, 500, Config.Prediction, function(v) Config.Prediction = v end, "Prediction")
+createSlider(aimPage, "Hit Chance %", 0, 100, Config.HitChance, function(v) Config.HitChance = v end, "HitChance")
+createSlider(aimPage, "Randomization", 0, 50, Config.Randomization, function(v) Config.Randomization = v end, "Randomization")
+createSlider(aimPage, "Max Aim Dist", 50, 2000, Config.MaxAimDist, function(v) Config.MaxAimDist = v end, "MaxAimDist")
 createSection(aimPage, "Режим")
 local aimModes = {{name="🎥 Camera", value="Camera"}, {name="🖱 Mouse", value="Mouse"}}
 local aimModeBtns = {}
@@ -1341,7 +1539,7 @@ for _, opt in ipairs(aimModes) do
             TweenService:Create(btn2, TweenInfo.new(0.15), {
                 BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
         end
-    end)
+    end, "AimMode", opt.value)
     if opt.value == Config.AimMode then b.BackgroundColor3 = T().accent1 end
     aimModeBtns[opt.value] = b
 end
@@ -1355,11 +1553,12 @@ for _, opt in ipairs(aimOpts) do
             TweenService:Create(btn2, TweenInfo.new(0.15), {
                 BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
         end
-    end)
+    end, "AimPart", opt.value)
     if opt.value == Config.AimPart then b.BackgroundColor3 = T().accent1 end
     aimBtns[opt.value] = b
 end
 createSection(aimPage, "Приоритет")
+createToggle(aimPage, "Включить приоритет", Config.AimPriorityEnabled, function(v) Config.AimPriorityEnabled = v end, "AimPriorityEnabled")
 local priorities = {{name="📏 Distance", value="Distance"}, {name="❤ Health", value="Health"}, {name="✛ Crosshair", value="Crosshair"}}
 local prioBtns = {}
 for _, opt in ipairs(priorities) do
@@ -1369,17 +1568,19 @@ for _, opt in ipairs(priorities) do
             TweenService:Create(btn2, TweenInfo.new(0.15), {
                 BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
         end
-    end)
+    end, "AimPriority", opt.value)
     if opt.value == Config.AimPriority then b.BackgroundColor3 = T().accent1 end
     prioBtns[opt.value] = b
 end
 createSection(aimPage, "Дополнительно")
-createToggle(aimPage, "Wall Check", Config.WallCheck, function(v) Config.WallCheck = v end)
-createToggle(aimPage, "Toggle режим", Config.ToggleMode, function(v) Config.ToggleMode = v end)
-createToggle(aimPage, "Авто-выстрел", Config.AutoShoot, function(v) Config.AutoShoot = v end)
-createToggle(aimPage, "Стоп после убийства", Config.StopOnKill, function(v) Config.StopOnKill = v end)
+createToggle(aimPage, "Wall Check", Config.WallCheck, function(v) Config.WallCheck = v end, "WallCheck")
+createToggle(aimPage, "Toggle режим", Config.ToggleMode, function(v) Config.ToggleMode = v end, "ToggleMode")
+createToggle(aimPage, "Авто-выстрел", Config.AutoShoot, function(v) Config.AutoShoot = v end, "AutoShoot")
+createToggle(aimPage, "Стоп после убийства", Config.StopOnKill, function(v) Config.StopOnKill = v end, "StopOnKill")
+createToggle(aimPage, "Trigger Bot", Config.TriggerBot, function(v) Config.TriggerBot = v end, "TriggerBot")
+createSlider(aimPage, "Trigger Delay (ms)", 0, 500, Config.TriggerBotDelay, function(v) Config.TriggerBotDelay = v end, "TriggerBotDelay")
 createSection(aimPage, "Клавиша активации")
-local keyBtn = createOption(aimPage, "Текущая: " .. Config.AimKeyString .. " (нажми чтобы сменить)", function(btn)
+createOption(aimPage, "Текущая: " .. Config.AimKeyString .. " (нажми чтобы сменить)", function(btn)
     btn.Text = "Нажми любую клавишу..."
     local conn
     conn = UserInputService.InputBegan:Connect(function(input, gpe)
@@ -1397,17 +1598,17 @@ local keyBtn = createOption(aimPage, "Текущая: " .. Config.AimKeyString .
         end
         conn:Disconnect()
         btn.Text = "Текущая: " .. Config.AimKeyString .. " (нажми чтобы сменить)"
-        notify("Клавиша изменена: " .. Config.AimKeyString, Color3.fromRGB(100,255,100))
+        notify("Клавиша: " .. Config.AimKeyString, Color3.fromRGB(100,255,100))
     end)
 end)
 
 -- VISUALS
 createSection(visPage, "Highlight")
-createToggle(visPage, "Highlight ESP", Config.ShowHighlight, function(v) Config.ShowHighlight = v end)
-createSlider(visPage, "Fill Transparency", 0, 1, Config.HighlightFillTransparency, function(v) Config.HighlightFillTransparency = v end)
-createSlider(visPage, "Outline Transparency", 0, 1, Config.HighlightOutlineTransparency, function(v) Config.HighlightOutlineTransparency = v end)
+createToggle(visPage, "Highlight ESP", Config.ShowHighlight, function(v) Config.ShowHighlight = v end, "ShowHighlight")
+createSlider(visPage, "Fill Transparency", 0, 1, Config.HighlightFillTransparency, function(v) Config.HighlightFillTransparency = v end, "HighlightFillTransparency")
+createSlider(visPage, "Outline Transparency", 0, 1, Config.HighlightOutlineTransparency, function(v) Config.HighlightOutlineTransparency = v end, "HighlightOutlineTransparency")
 createSection(visPage, "Tracer")
-createToggle(visPage, "Линии до игроков", Config.ShowTracer, function(v) Config.ShowTracer = v end)
+createToggle(visPage, "Линии до игроков", Config.ShowTracer, function(v) Config.ShowTracer = v end, "ShowTracer")
 local tracerOpts = {{name="⬇ Снизу", value="Bottom"}, {name="⬆ Сверху", value="Top"}, {name="✛ Центр", value="Center"}}
 local tracerBtns = {}
 for _, opt in ipairs(tracerOpts) do
@@ -1417,19 +1618,16 @@ for _, opt in ipairs(tracerOpts) do
             TweenService:Create(btn2, TweenInfo.new(0.15), {
                 BackgroundColor3 = (v == opt.value) and T().accent1 or T().content}):Play()
         end
-    end)
+    end, "TracerOrigin", opt.value)
     if opt.value == Config.TracerOrigin then b.BackgroundColor3 = T().accent1 end
     tracerBtns[opt.value] = b
 end
-createSection(visPage, "FOV Circle")
-createToggle(visPage, "Показывать FOV", Config.ShowFOV, function(v) Config.ShowFOV = v; FOVCircle.Visible = v end)
-createSlider(visPage, "FOV Transparency", 0, 1, Config.FOVTransparency, function(v) Config.FOVTransparency = v; FOVStroke.Transparency = v end)
 createSection(visPage, "Watermark")
-createToggle(visPage, "Показывать Watermark", Config.WatermarkEnabled, function(v) Config.WatermarkEnabled = v; Watermark.Visible = v end)
+createToggle(visPage, "Показывать Watermark", Config.WatermarkEnabled, function(v) Config.WatermarkEnabled = v; Watermark.Visible = v end, "WatermarkEnabled")
 createSection(visPage, "Misc")
-createToggle(visPage, "Anti-AFK", Config.AntiAFK, function(v) Config.AntiAFK = v end)
+createToggle(visPage, "Anti-AFK", Config.AntiAFK, function(v) Config.AntiAFK = v end, "AntiAFK")
 
--- COLORS (все colorRow с исправленным синтаксисом)
+-- COLORS
 local function colorRow(parent, label, getter, setter)
     createSection(parent, label)
     local row = Instance.new("Frame")
@@ -1454,13 +1652,11 @@ local function colorRow(parent, label, getter, setter)
     swatch.BorderSizePixel = 0
     swatch.Parent = row
     Instance.new("UICorner", swatch).CornerRadius = UDim.new(0, 6)
-
-    local startC = getter()
-    lbl.Text = string.format("RGB(%d,%d,%d)", math.floor(startC.R*255), math.floor(startC.G*255), math.floor(startC.B*255))
-
+    local c0 = getter()
+    lbl.Text = string.format("RGB(%d,%d,%d)", math.floor(c0.R*255), math.floor(c0.G*255), math.floor(c0.B*255))
     for i, ch in ipairs({"R","G","B"}) do
-        local c0 = getter()
-        local val = ({c0.R, c0.G, c0.B})[i] * 255
+        local c1 = getter()
+        local val = ({c1.R, c1.G, c1.B})[i] * 255
         createSlider(parent, "  " .. ch, 0, 255, val, function(v)
             local c = getter()
             local comps = {c.R*255, c.G*255, c.B*255}
@@ -1483,13 +1679,14 @@ colorRow(colPage, "Highlight Outline", function() return Config.HighlightOutline
 colorRow(colPage, "Skeleton", function() return Config.SkeletonColor end, function(c) Config.SkeletonColor = c end)
 colorRow(colPage, "FOV Color", function() return Config.FOVColor end, function(c)
     Config.FOVColor = c
-    FOVStroke.Color = c
+    if FOVStroke then FOVStroke.Color = c end
 end)
 colorRow(colPage, "Target Color", function() return Config.TargetColor end, function(c) Config.TargetColor = c end)
+colorRow(colPage, "Offscreen Arrow", function() return Config.OffscreenArrowColor end, function(c) Config.OffscreenArrowColor = c end)
 
 -- PLAYERS
 createSection(plrPage, "Whitelist")
-createToggle(plrPage, "Только из списка", Config.WhitelistOnly, function(v) Config.WhitelistOnly = v end)
+createToggle(plrPage, "Только из списка", Config.WhitelistOnly, function(v) Config.WhitelistOnly = v end, "WhitelistOnly")
 local PlayerListFrame = Instance.new("Frame")
 PlayerListFrame.Size = UDim2.new(1, 0, 0, 300)
 PlayerListFrame.BackgroundColor3 = T().content
@@ -1784,5 +1981,5 @@ end)
 OpenBtn.Visible = false
 switchTab("ESP")
 openMenu()
-notify("BURMALDA v17.1 загружен", Color3.fromRGB(100,255,100))
-print("[BURMALDA v17.1] Loaded! ✅ Configs: " .. (hasFS and "ON" or "OFF"))
+notify("BURMALDA v18.0 загружен", Color3.fromRGB(100,255,100))
+print("[BURMALDA v18.0] Loaded! ✅ Configs: " .. (hasFS and "ON" or "OFF"))
